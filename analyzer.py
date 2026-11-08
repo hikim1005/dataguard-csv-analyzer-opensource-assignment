@@ -53,10 +53,24 @@ def analyze_csv_bytes(data: bytes) -> dict:
     else:
         anomaly["message"] = "수치형 컬럼이 없어 이상치 탐지를 건너뛰었습니다."
 
+    missing_ratio = (int(df.isna().sum().sum()) / (len(df) * len(df.columns)) * 100
+                     if len(df) and len(df.columns) else 0)
+    duplicate_count = int(df.duplicated().sum())
+    duplicate_ratio = duplicate_count / len(df) * 100 if len(df) else 0
+    anomaly_ratio = float(anomaly["ratio"] or 0)
+    quality = {
+        "score": max(0, min(100, round(
+            100 - missing_ratio * 0.5 - duplicate_ratio * 0.3 - anomaly_ratio * 0.2, 2)
+        )),
+        "missing_ratio": round(missing_ratio, 2),
+        "duplicate_ratio": round(duplicate_ratio, 2),
+        "anomaly_ratio": round(anomaly_ratio, 2),
+    }
+
     preview = df.head(PREVIEW_ROWS).astype(object).where(pd.notna(df.head(PREVIEW_ROWS)), None)
     return {"rows": int(len(df)), "columns": int(len(df.columns)),
             "column_types": [{"column": str(c), "dtype": str(df[c].dtype)} for c in df.columns],
-            "missing": missing, "duplicates": int(df.duplicated().sum()),
+            "missing": missing, "duplicates": duplicate_count, "quality": quality,
             "numeric_stats": stats, "anomalies": anomaly,
             "preview": {"columns": [str(c) for c in df.columns], "rows": preview.to_dict(orient="records")}}
 
