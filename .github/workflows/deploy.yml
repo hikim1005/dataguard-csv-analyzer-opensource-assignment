@@ -1,0 +1,43 @@
+name: DataGuard Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Deploy latest container
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/dataguard-csv-analyzer:latest
+        run: |
+          docker stop dataguard 2>/dev/null || true
+          docker rm dataguard 2>/dev/null || true
+          docker pull "$IMAGE"
+          docker run -d --name dataguard -p 8000:8000 "$IMAGE"
+
+      - name: Check deployed service
+        run: |
+          for i in {1..30}; do
+            if curl --fail --silent http://localhost:8000/ > /dev/null; then
+              echo "DataGuard service is running."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "DataGuard service did not respond. Container logs:"
+          docker logs dataguard
+          exit 1
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs dataguard 2>&1 || true
