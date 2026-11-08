@@ -8,6 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: self-hosted
+    timeout-minutes: 10
 
     steps:
       - name: Log in to Docker Hub
@@ -16,31 +17,53 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Deploy latest container
-        shell: pwsh
+      - name: Pull latest Docker image
+        shell: powershell
         env:
           IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/dataguard-csv-analyzer:latest
         run: |
           Write-Host "Pull latest Docker image"
           docker pull $env:IMAGE
+
           if ($LASTEXITCODE -ne 0) {
+            Write-Host "Docker image pull failed."
             exit 1
           }
 
-          Write-Host "Remove existing containers"
+      - name: Remove existing containers
+        shell: powershell
+        run: |
+          Write-Host "Remove existing dataguard container"
           docker rm -f dataguard 2>$null
+
+          Write-Host "Remove old test container if it exists"
           docker rm -f dataguard-test 2>$null
+
+          # 컨테이너가 없어서 발생한 종료 코드는 무시
           $global:LASTEXITCODE = 0
 
+      - name: Start new DataGuard container
+        shell: powershell
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/dataguard-csv-analyzer:latest
+        run: |
           Write-Host "Start new DataGuard container"
-          docker run -d --name dataguard -p 8000:8000 $env:IMAGE
+
+          docker run -d `
+            --name dataguard `
+            -p 8000:8000 `
+            $env:IMAGE
+
           if ($LASTEXITCODE -ne 0) {
+            Write-Host "Docker container start failed."
             exit 1
           }
 
       - name: Check deployed service
-        shell: pwsh
+        shell: powershell
         run: |
+          Write-Host "Check DataGuard service health"
+
           for ($i = 1; $i -le 30; $i++) {
             try {
               $response = Invoke-WebRequest `
@@ -54,19 +77,27 @@ jobs:
               }
             }
             catch {
-              Write-Host "Waiting for DataGuard service..."
+              Write-Host "Waiting for DataGuard service... ($i/30)"
             }
 
             Start-Sleep -Seconds 2
           }
 
           Write-Host "DataGuard service did not respond."
+          docker ps -a
           docker logs dataguard
           exit 1
 
+      - name: Show container status
+        shell: powershell
+        run: |
+          Write-Host "Running container status:"
+          docker ps
+
       - name: Show container logs on failure
         if: failure()
-        shell: pwsh
+        shell: powershell
         run: |
+          Write-Host "Container logs:"
           docker logs dataguard 2>$null
           exit 0
